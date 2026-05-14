@@ -8,6 +8,8 @@ import 'react-datepicker/dist/react-datepicker.css';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
+import { Tooltip } from 'react-tooltip';
+import 'react-tooltip/dist/react-tooltip.css';
 
 export default function Home() {
   const { data: session } = useSession();
@@ -18,6 +20,9 @@ export default function Home() {
   const [reschedulingPostId, setReschedulingPostId] = useState<string | null>(null);
   const [rescheduleTime, setRescheduleTime] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState('Dashboard');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [defaultScheduleOffset, setDefaultScheduleOffset] = useState(60); // minutes
 
   useEffect(() => {
     if (session) {
@@ -82,6 +87,161 @@ export default function Home() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleAIAction = async (mode: 'generate' | 'polish') => {
+    if (mode === 'generate' && !aiPrompt) return;
+    if (mode === 'polish' && !content) return;
+
+    setAiLoading(true);
+    try {
+      const res = await fetch('/api/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          prompt: aiPrompt, 
+          currentContent: content, 
+          mode 
+        }),
+      });
+      const data = await res.json();
+      if (data.text) {
+        setContent(data.text);
+        setAiPrompt('');
+      } else if (data.error) {
+        alert(data.error);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setAiLoading(false);
+  };
+
+  const renderPostItem = (post: any) => (
+    <div className="post-item" key={post.id} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="post-content">
+          <div className="post-text">"{post.content}"</div>
+          <div className="post-meta">
+            <span>Scheduled for: {new Date(post.scheduledTime).toLocaleString()}</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+          <div className="status-badge" style={{ 
+            backgroundColor: post.status === 'published' ? 'rgba(16, 185, 129, 0.1)' : post.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 211, 238, 0.1)',
+            color: post.status === 'published' ? '#10b981' : post.status === 'failed' ? '#ef4444' : 'var(--accent)'
+          }}>{post.status}</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => { setReschedulingPostId(post.id); setRescheduleTime(new Date(post.scheduledTime)); }}>Reschedule</button>
+            <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '12px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' }} onClick={() => handleCancel(post.id)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+      {reschedulingPostId === post.id && (
+        <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <div style={{ flex: 1 }}>
+            <DatePicker
+              selected={rescheduleTime}
+              onChange={(date: Date | null) => date && setRescheduleTime(date)}
+              showTimeSelect
+              timeFormat="HH:mm"
+              timeIntervals={15}
+              timeCaption="Time"
+              dateFormat="MMMM d, yyyy h:mm aa"
+              className="custom-datepicker-input"
+              wrapperClassName="datepicker-wrapper"
+            />
+          </div>
+          <button className="btn-primary" onClick={() => handleReschedule(post.id)}>Save</button>
+          <button className="btn-secondary" onClick={() => setReschedulingPostId(null)}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderScheduled = () => {
+    const scheduledPosts = posts.filter(p => p.status === 'scheduled');
+    return (
+      <div className="section-card">
+        <div className="section-header">
+          <h2>Scheduled Posts ({scheduledPosts.length})</h2>
+        </div>
+        <div className="post-list">
+          {scheduledPosts.length === 0 ? (
+            <div className="empty-state">No scheduled posts.</div>
+          ) : (
+            scheduledPosts.map(post => renderPostItem(post))
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMyPosts = () => {
+    const publishedPosts = posts.filter(p => p.status === 'published');
+    return (
+      <div className="section-card">
+        <div className="section-header">
+          <h2>Published History ({publishedPosts.length})</h2>
+        </div>
+        <div className="post-list">
+          {publishedPosts.length === 0 ? (
+            <div className="empty-state">No published posts yet.</div>
+          ) : (
+            publishedPosts.map(post => renderPostItem(post))
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDrafts = () => {
+    const draftPosts = posts.filter(p => p.status === 'draft');
+    return (
+      <div className="section-card">
+        <div className="section-header">
+          <h2>Drafts ({draftPosts.length})</h2>
+        </div>
+        <div className="post-list">
+          {draftPosts.length === 0 ? (
+            <div className="empty-state">No drafts found.</div>
+          ) : (
+            draftPosts.map(post => renderPostItem(post))
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSettings = () => {
+    return (
+      <div className="settings-container" style={{ display: 'grid', gap: '24px' }}>
+        <div className="section-card">
+          <div className="section-header">
+            <h2>Personalization</h2>
+          </div>
+          <div style={{ display: 'grid', gap: '16px' }}>
+            <div className="setting-item">
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>Default Scheduling Offset (minutes)</label>
+              <input 
+                type="number" 
+                value={defaultScheduleOffset}
+                onChange={(e) => setDefaultScheduleOffset(parseInt(e.target.value))}
+                className="custom-datepicker-input"
+                style={{ width: '120px' }}
+              />
+            </div>
+            <div className="setting-item">
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>Theme</label>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button className="btn-secondary" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}>Deep Dark (Default)</button>
+                <button className="btn-secondary" onClick={() => alert('Light mode coming soon!')}>Solar Light</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const calculateStreak = () => {
@@ -170,7 +330,15 @@ export default function Home() {
                 if (!value) return 'color-empty';
                 return `color-scale-${Math.min(value.count, 4)}`;
               }}
+              tooltipDataAttrs={(value: any) => {
+                if (!value || !value.date) return { 'data-tooltip-id': 'heatmap-tooltip', 'data-tooltip-content': 'No posts' };
+                return {
+                  'data-tooltip-id': 'heatmap-tooltip',
+                  'data-tooltip-content': `${value.count} post${value.count === 1 ? '' : 's'} on ${value.date}`,
+                };
+              }}
             />
+            <Tooltip id="heatmap-tooltip" style={{ backgroundColor: 'var(--sidebar-bg)', border: '1px solid var(--card-border)', borderRadius: '8px', fontSize: '12px' }} />
           </div>
         </div>
 
@@ -225,17 +393,18 @@ export default function Home() {
         </div>
         <ul className="nav-menu">
           <li className={`nav-item ${activeTab === 'Dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('Dashboard')}>Dashboard</li>
-          <li className="nav-item">Scheduled</li>
-          <li className="nav-item">Drafts</li>
+          <li className={`nav-item ${activeTab === 'My Posts' ? 'active' : ''}`} onClick={() => setActiveTab('My Posts')}>My Posts</li>
+          <li className={`nav-item ${activeTab === 'Scheduled' ? 'active' : ''}`} onClick={() => setActiveTab('Scheduled')}>Scheduled</li>
+          <li className={`nav-item ${activeTab === 'Drafts' ? 'active' : ''}`} onClick={() => setActiveTab('Drafts')}>Drafts</li>
           <li className={`nav-item ${activeTab === 'Analytics' ? 'active' : ''}`} onClick={() => setActiveTab('Analytics')}>Analytics</li>
-          <li className="nav-item">Settings</li>
+          <li className={`nav-item ${activeTab === 'Settings' ? 'active' : ''}`} onClick={() => setActiveTab('Settings')}>Settings</li>
         </ul>
       </aside>
 
       {/* Main Content */}
       <main className="main-content">
         <header className="header">
-          <h1>Overview</h1>
+          <h1>{activeTab}</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             {session?.user && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -258,131 +427,132 @@ export default function Home() {
               <>
                 {/* Stats */}
                 <div className="stats-grid">
-              <div className="stat-card">
-                <div className="stat-title">Total Posts</div>
-                <div className="stat-value">{posts.length}</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-title">Scheduled</div>
-                <div className="stat-value" style={{ color: 'var(--accent)' }}>
-                  {posts.filter(p => p.status === 'scheduled').length}
-                </div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-title">Avg. Engagement</div>
-                <div className="stat-value">TBD</div>
-              </div>
-            </div>
-
-            {/* Content Layout */}
-            <div className="content-grid">
-              {/* Upcoming Posts */}
-              <div className="section-card">
-                <div className="section-header">
-                  <h2>Upcoming Posts</h2>
-                  <button className="btn-secondary">View All</button>
-                </div>
-                <div className="post-list">
-                  {posts.length === 0 ? (
-                    <div style={{ color: '#a1a1aa', fontSize: '14px', fontStyle: 'italic' }}>
-                      No posts scheduled yet. Draft one below!
+                  <div className="stat-card">
+                    <div className="stat-title">Total Posts</div>
+                    <div className="stat-value">{posts.length}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-title">Scheduled</div>
+                    <div className="stat-value" style={{ color: 'var(--accent)' }}>
+                      {posts.filter(p => p.status === 'scheduled').length}
                     </div>
-                  ) : (
-                    posts.map(post => (
-                      <div className="post-item" key={post.id} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div className="post-content">
-                            <div className="post-text">"{post.content}"</div>
-                            <div className="post-meta">
-                              <span>Scheduled for: {new Date(post.scheduledTime).toLocaleString()}</span>
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
-                            <div className="status-badge">{post.status}</div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => { setReschedulingPostId(post.id); setRescheduleTime(new Date(post.scheduledTime)); }}>Reschedule</button>
-                              <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '12px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' }} onClick={() => handleCancel(post.id)}>Cancel</button>
-                            </div>
-                          </div>
-                        </div>
-                        {reschedulingPostId === post.id && (
-                          <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-                            <div style={{ flex: 1 }}>
-                              <DatePicker
-                                selected={rescheduleTime}
-                                onChange={(date: Date | null) => date && setRescheduleTime(date)}
-                                showTimeSelect
-                                timeFormat="HH:mm"
-                                timeIntervals={15}
-                                timeCaption="Time"
-                                dateFormat="MMMM d, yyyy h:mm aa"
-                                className="custom-datepicker-input"
-                                wrapperClassName="datepicker-wrapper"
-                              />
-                            </div>
-                            <button className="btn-primary" onClick={() => handleReschedule(post.id)}>Save</button>
-                            <button className="btn-secondary" onClick={() => setReschedulingPostId(null)}>Cancel</button>
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Quick Create */}
-              <div className="section-card">
-                <div className="section-header">
-                  <h2>Quick Draft</h2>
-                </div>
-                <div className="create-post-form">
-                  <textarea 
-                    placeholder="What do you want to talk about?"
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                  ></textarea>
-                  <div className="create-post-actions" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                    <div style={{ flex: 1 }}>
-                      <DatePicker
-                        selected={scheduledTime}
-                        onChange={(date: Date | null) => date && setScheduledTime(date)}
-                        showTimeSelect
-                        timeFormat="HH:mm"
-                        timeIntervals={15}
-                        timeCaption="Time"
-                        dateFormat="MMMM d, yyyy h:mm aa"
-                        className="custom-datepicker-input"
-                        wrapperClassName="datepicker-wrapper"
-                      />
-                    </div>
-                    <button className="btn-primary" onClick={async () => {
-                      if (!content || !scheduledTime) return;
-                      setLoading(true);
-                      try {
-                        const res = await fetch('/api/posts', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ content, scheduledTime }), 
-                        });
-                        if (res.ok) {
-                          setContent('');
-                          alert('Post scheduled successfully!');
-                          fetchPosts();
-                        }
-                      } catch (e) {
-                        console.error(e);
-                      }
-                      setLoading(false);
-                    }} disabled={loading || !content}>
-                      {loading ? "Scheduling..." : "Schedule"}
-                    </button>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-title">Character Volume</div>
+                    <div className="stat-value">{calculateTotalVolume()}</div>
                   </div>
                 </div>
-              </div>
-            </div>
-            </>
+
+                {/* Content Layout */}
+                <div className="content-grid">
+                  {/* Upcoming Posts */}
+                  <div className="section-card">
+                    <div className="section-header">
+                      <h2>Upcoming Posts</h2>
+                      <button className="btn-secondary" onClick={() => setActiveTab('Scheduled')}>View All</button>
+                    </div>
+                    <div className="post-list">
+                      {posts.filter(p => p.status === 'scheduled').length === 0 ? (
+                        <div className="empty-state">No scheduled posts.</div>
+                      ) : (
+                        posts.filter(p => p.status === 'scheduled').slice(0, 3).map(post => renderPostItem(post))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quick Create & AI */}
+                  <div className="section-card">
+                    <div className="section-header">
+                      <h2>Quick Draft & AI Assistant</h2>
+                    </div>
+                    <div className="create-post-form">
+                      <div style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
+                        <input 
+                          type="text" 
+                          placeholder="AI Topic (e.g. 'Personal Branding Tips')..."
+                          value={aiPrompt}
+                          onChange={(e) => setAiPrompt(e.target.value)}
+                          className="custom-datepicker-input"
+                          style={{ flex: 1 }}
+                        />
+                        <button 
+                          className="btn-secondary" 
+                          onClick={() => handleAIAction('generate')}
+                          disabled={aiLoading || !aiPrompt}
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          {aiLoading ? '...' : '✨ Generate'}
+                        </button>
+                      </div>
+
+                      <textarea 
+                        placeholder="What do you want to talk about?"
+                        value={content}
+                        onChange={(e) => setContent(e.target.value)}
+                        style={{ minHeight: '150px' }}
+                      ></textarea>
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+                        <button 
+                          className="btn-secondary" 
+                          onClick={() => handleAIAction('polish')}
+                          disabled={aiLoading || !content}
+                          style={{ fontSize: '12px' }}
+                        >
+                          {aiLoading ? 'Polishing...' : '🪄 Polish with AI'}
+                        </button>
+                      </div>
+
+                      <div className="create-post-actions" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                        <div style={{ flex: 1 }}>
+                          <DatePicker
+                            selected={scheduledTime}
+                            onChange={(date: Date | null) => date && setScheduledTime(date)}
+                            showTimeSelect
+                            timeFormat="HH:mm"
+                            timeIntervals={15}
+                            timeCaption="Time"
+                            dateFormat="MMMM d, yyyy h:mm aa"
+                            className="custom-datepicker-input"
+                            wrapperClassName="datepicker-wrapper"
+                          />
+                        </div>
+                        <button className="btn-primary" onClick={async () => {
+                          if (!content || !scheduledTime) return;
+                          setLoading(true);
+                          try {
+                            const res = await fetch('/api/posts', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ content, scheduledTime }), 
+                            });
+                            if (res.ok) {
+                              setContent('');
+                              alert('Post scheduled successfully!');
+                              fetchPosts();
+                            }
+                          } catch (e) {
+                            console.error(e);
+                          }
+                          setLoading(false);
+                        }} disabled={loading || !content}>
+                          {loading ? "Scheduling..." : "Schedule"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : activeTab === 'My Posts' ? (
+              renderMyPosts()
+            ) : activeTab === 'Scheduled' ? (
+              renderScheduled()
+            ) : activeTab === 'Drafts' ? (
+              renderDrafts()
             ) : activeTab === 'Analytics' ? (
               renderAnalytics()
+            ) : activeTab === 'Settings' ? (
+              renderSettings()
             ) : null}
           </>
         ) : (

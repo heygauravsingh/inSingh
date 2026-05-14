@@ -363,19 +363,19 @@ body {
 }
 
 .react-calendar-heatmap .color-scale-1 {
-  fill: rgba(10, 102, 194, 0.2);
+  fill: #dbeafe; /* Light Blue */
 }
 
 .react-calendar-heatmap .color-scale-2 {
-  fill: rgba(10, 102, 194, 0.4);
+  fill: #93c5fd;
 }
 
 .react-calendar-heatmap .color-scale-3 {
-  fill: rgba(10, 102, 194, 0.7);
+  fill: #3b82f6;
 }
 
 .react-calendar-heatmap .color-scale-4 {
-  fill: rgba(10, 102, 194, 1);
+  fill: #1e40af; /* Dark Blue */
 }
 
 .react-calendar-heatmap rect {
