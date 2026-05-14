@@ -23,6 +23,9 @@ export default function Home() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [defaultScheduleOffset, setDefaultScheduleOffset] = useState(60); // minutes
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
 
   useEffect(() => {
     if (session) {
@@ -117,11 +120,39 @@ export default function Home() {
     setAiLoading(false);
   };
 
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.imageUrl) {
+        setImageUrl(data.imageUrl);
+      }
+    } catch (e) {
+      console.error("Upload failed", e);
+    }
+    setUploading(false);
+  };
+
   const renderPostItem = (post: any) => (
     <div className="post-item" key={post.id} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="post-content">
           <div className="post-text">"{post.content}"</div>
+          {post.imageUrl && (
+            <div style={{ marginTop: '12px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--card-border)' }}>
+              <img src={post.imageUrl} alt="Post Attachment" style={{ width: '100%', maxHeight: '200px', objectFit: 'cover' }} />
+            </div>
+          )}
           <div className="post-meta">
             <span>Scheduled for: {new Date(post.scheduledTime).toLocaleString()}</span>
           </div>
@@ -161,18 +192,84 @@ export default function Home() {
 
   const renderScheduled = () => {
     const scheduledPosts = posts.filter(p => p.status === 'scheduled');
+    
+    // Calendar Logic
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+    
+    const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    
+    const days = [];
+    for (let i = 0; i < firstDayOfMonth; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push(i);
+
+    const postsByDate: Record<string, any[]> = {};
+    scheduledPosts.forEach(p => {
+      const d = new Date(p.scheduledTime).getDate();
+      if (!postsByDate[d]) postsByDate[d] = [];
+      postsByDate[d].push(p);
+    });
+
+    const monthName = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(today);
+
     return (
-      <div className="section-card">
-        <div className="section-header">
-          <h2>Scheduled Posts ({scheduledPosts.length})</h2>
+      <div className="calendar-view-container" style={{ display: 'grid', gap: '24px' }}>
+        <div className="section-card">
+          <div className="section-header">
+            <h2>{monthName} {currentYear}</h2>
+            <div style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{scheduledPosts.length} posts scheduled</div>
+          </div>
+          
+          <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px' }}>
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+              <div key={day} style={{ textAlign: 'center', fontSize: '12px', fontWeight: 600, color: 'var(--primary)', padding: '8px 0' }}>{day}</div>
+            ))}
+            {days.map((day, idx) => {
+              const hasPosts = day && postsByDate[day];
+              const isSelected = day?.toString() === selectedCalendarDate;
+              return (
+                <div 
+                  key={idx} 
+                  onClick={() => day && setSelectedCalendarDate(day.toString())}
+                  className={`calendar-day ${day ? 'active' : ''} ${hasPosts ? 'has-posts' : ''} ${isSelected ? 'selected' : ''}`}
+                  style={{
+                    aspectRatio: '1',
+                    background: isSelected ? 'rgba(10, 102, 194, 0.2)' : day ? 'rgba(255,255,255,0.03)' : 'transparent',
+                    borderRadius: '8px',
+                    padding: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    cursor: day ? 'pointer' : 'default',
+                    border: isSelected ? '1px solid var(--primary)' : '1px solid transparent',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <span style={{ fontSize: '14px', fontWeight: day === today.getDate() ? 700 : 400, color: day === today.getDate() ? 'var(--primary)' : 'inherit' }}>{day}</span>
+                  {hasPosts && (
+                    <div style={{ background: 'var(--primary)', width: '20px', height: '20px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color: 'white', fontWeight: 'bold', alignSelf: 'flex-end' }}>
+                      {postsByDate[day!].length}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <div className="post-list">
-          {scheduledPosts.length === 0 ? (
-            <div className="empty-state">No scheduled posts.</div>
-          ) : (
-            scheduledPosts.map(post => renderPostItem(post))
-          )}
-        </div>
+
+        {selectedCalendarDate && postsByDate[parseInt(selectedCalendarDate)] && (
+          <div className="section-card animate-slide-up">
+            <div className="section-header">
+              <h2>Posts for {monthName} {selectedCalendarDate}</h2>
+              <button className="btn-secondary" onClick={() => setSelectedCalendarDate(null)}>Close</button>
+            </div>
+            <div className="post-list">
+              {postsByDate[parseInt(selectedCalendarDate)].map(post => renderPostItem(post))}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -489,10 +586,39 @@ export default function Home() {
                         placeholder="What do you want to talk about?"
                         value={content}
                         onChange={(e) => setContent(e.target.value)}
-                        style={{ minHeight: '150px' }}
+                        style={{ minHeight: '150px', marginBottom: '8px' }}
                       ></textarea>
 
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+                      {imageUrl && (
+                        <div style={{ position: 'relative', marginBottom: '16px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--card-border)' }}>
+                          <img src={imageUrl} alt="Upload Preview" style={{ width: '100%', maxHeight: '200px', objectFit: 'cover' }} />
+                          <button 
+                            onClick={() => setImageUrl(null)}
+                            style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input 
+                            type="file" 
+                            id="image-upload" 
+                            hidden 
+                            accept="image/*" 
+                            onChange={handleUpload}
+                          />
+                          <label htmlFor="image-upload" className="btn-secondary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {uploading ? 'Uploading...' : (
+                              <>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                                Add Image
+                              </>
+                            )}
+                          </label>
+                        </div>
                         <button 
                           className="btn-secondary" 
                           onClick={() => handleAIAction('polish')}
@@ -524,12 +650,16 @@ export default function Home() {
                             const res = await fetch('/api/posts', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ content, scheduledTime }), 
+                              body: JSON.stringify({ content, scheduledTime, imageUrl }), 
                             });
                             if (res.ok) {
                               setContent('');
+                              setImageUrl(null);
                               alert('Post scheduled successfully!');
                               fetchPosts();
+                            } else {
+                              const errorData = await res.json();
+                              alert(`Failed to schedule post: ${errorData.error || 'Unknown error'}`);
                             }
                           } catch (e) {
                             console.error(e);

@@ -10,7 +10,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { content, scheduledTime } = await req.json();
+    const { content, scheduledTime, imageUrl } = await req.json();
 
     if (!content) {
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
@@ -18,20 +18,37 @@ export async function POST(req: Request) {
 
     // @ts-ignore
     const userId = session.user.id;
+    if (!userId) {
+      return NextResponse.json({ error: "User ID missing from session" }, { status: 401 });
+    }
+
+    let finalScheduledTime = scheduledTime ? new Date(scheduledTime) : new Date();
+    if (isNaN(finalScheduledTime.getTime())) {
+      finalScheduledTime = new Date();
+    }
+
+    const postData = {
+      content,
+      scheduledTime: finalScheduledTime,
+      userId: userId,
+      status: scheduledTime ? "scheduled" : "draft",
+      imageUrl: imageUrl || null,
+    };
+
+    console.log("Prisma Create Attempt:", postData);
 
     const post = await prisma.post.create({
-      data: {
-        content,
-        scheduledTime: scheduledTime ? new Date(scheduledTime) : new Date(),
-        userId: userId,
-        status: scheduledTime ? "scheduled" : "draft",
-      },
+      data: postData,
     });
 
+    console.log("Post created successfully:", post.id);
+
     return NextResponse.json(post);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating post:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    let errorMessage = error.message || "Internal Server Error";
+    if (error.code) errorMessage = `Prisma Error ${error.code}: ${errorMessage}`;
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
